@@ -1,62 +1,194 @@
-name: 编译风驰 KO
+name: 云端编译风驰 KO
 
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: 'build.sh 构建目标（默认 hmbird）'
+      soc:
+        description: '目标 SoC（all=全部并行构建）'
+        type: choice
+        required: true
+        default: 'all'
+        options:
+          - 'all'
+          - 'sm8850'
+          - 'sm8750'
+          - 'sm8650'
+      kernel_branch:
+        description: '内核源码分支（留空则按 SoC 使用默认最新分支）'
         required: false
-        default: 'hmbird'
-      kernel_tree:
-        description: '内核树路径（自建 runner 上）'
-        required: false
-        default: '/home/murongruyan/android16-kernel-rmx5200'
-      kernel_out:
-        description: 'Kbuild 输出目录（含 include/generated）'
-        required: false
-        default: '/home/murongruyan/rmx5200-kernel-out'
-      llvm_tools:
-        description: 'LLVM 工具目录'
-        required: false
-        default: '/home/murongruyan/localtools/usr/bin'
-      update_bin:
-        description: '编译成功后是否把 bin/*.ko 提交回仓库（yes/no）'
-        required: false
+        default: ''
+      attach_release:
+        description: '构建完成后发布到 GitHub Release'
+        type: choice
+        required: true
         default: 'no'
+        options:
+          - 'no'
+          - 'yes'
+      release_tag:
+        description: 'Release tag（仅 attach_release=yes 时生效，留空自动 ko-<运行号>）'
+        required: false
+        default: ''
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: 编译 KO（自建 runner）
-    runs-on: [self-hosted, linux]
+  setup:
+    name: 生成构建矩阵
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
-      - name: 检出仓库
+      - name: 生成矩阵
+        id: matrix
+        env:
+          SOC_INPUT: ${{ github.event.inputs.soc }}
+          BRANCH_INPUT: ${{ github.event.inputs.kernel_branch }}
+        shell: python
+        run: |
+          import json, os
+          # (soc, 内核源码镜像仓库, 默认分支, 工具链 release tag, clang zip 名)
+          targets = [
+              ("sm8850", "cctv18/android_kernel_common_oneplus_sm8850",
+               "oneplus/sm8850_v_16.0.0_oneplus_15", "LLVM-Clang19-r536225", "clang-r536225"),
+              ("sm8750", "cctv18/android_kernel_common_oneplus_sm8750",
+               "oneplus/sm8750_v_16.0.0_oneplus_13_6.6.89", "LLVM-Clang18-r510928", "clang-r510928"),
+              ("sm8650", "cctv18/android_kernel_common_oneplus_sm8650",
+               "oneplus/sm8650_v_15.0.0_oneplus12_6.1.118", "LLVM-Clang18-r510928", "clang-r510928"),
+          ]
+          soc = os.environ["SOC_INPUT"]
+          branch = os.environ["BRANCH_INPUT"].strip()
+          include = []
+          for s, repo, default_branch, tag, clang_zip in targets:
+              if soc in ("all", s):
+                  include.append({
+                      "soc": s,
+                      "repo": repo,
+                      "branch": branch or default_branch,
+                      "tag": tag,
+                      "clang_zip": clang_zip,
+                  })
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write("matrix=" + json.dumps({"include": include}) + "\n")
+
+  build:
+    name: 编译 ${{ matrix.soc }} 风驰 KO
+    needs: setup
+    if: ${{ fromJson(needs.setup.outputs.matrix).include[0] != null }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      WORK: ${{ github.workspace }}/kernel_workspace
+    steps:
+      - name: 检出本仓库
         uses: actions/checkout@v4
 
-      - name: 编译 KO
-        env:
-          KERNEL_TREE: ${{ github.event.inputs.kernel_tree }}
-          KERNEL_OUT: ${{ github.event.inputs.kernel_out }}
-          LLVM_TOOLS: ${{ github.event.inputs.llvm_tools }}
-        run: bash src/ko/build.sh "${{ github.event.inputs.target }}"
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            libelf-dev libdw-dev bc bison flex aria2 unzip kmod
 
-      - name: 上传 KO 构建产物
+      - name: 拉取内核源码与工具链（aria2 多线程）
+        run: |
+          mkdir -p "$WORK" && cd "$WORK"
+          # 借鉴 cctv18 方案：aria2 16 连接拉取内核源码 zip（比 git clone 快得多）
+          aria2c -q -s16 -x16 -k1M \
+            "https://github.com/${{ matrix.repo }}/archive/refs/heads/${{ matrix.branch }}.zip" \
+            -o common.zip &
+          aria2c -q -s16 -x16 -k1M \
+            "https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/${{ matrix.tag }}/${{ matrix.clang_zip }}.zip" \
+            -o clang.zip &
+          aria2c -q -s16 -x16 -k1M \
+            "https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/${{ matrix.tag }}/build-tools.zip" \
+            -o build-tools.zip &
+          wait
+          unzip -q common.zip
+          unzip -q clang.zip -d clang
+          unzip -q build-tools.zip -d build-tools
+          rm -f common.zip clang.zip build-tools.zip
+          mv android_kernel_common_oneplus_${{ matrix.soc }}-* common
+          CLANG_BIN=$(dirname "$(find "$WORK/clang" -name clang -type f | head -n1)")
+          echo "$CLANG_BIN" >> "$GITHUB_PATH"
+          echo "CLANG: $("$CLANG_BIN/clang" --version | head -n1)"
+          ls "$WORK"
+
+      - name: 配置内核并 prepare（只需头文件与脚本，不编整个内核）
+        run: |
+          cd "$WORK/common"
+          make O=out ARCH=arm64 LLVM=1 gki_defconfig
+          make O=out ARCH=arm64 LLVM=1 modules_prepare -j"$(nproc)"
+
+      - name: 编译 hmbird.ko
+        run: |
+          MOD_TMP=$(mktemp -d)
+          cp "${{ github.workspace }}/src/ko/hmbird.c" "$MOD_TMP/source.c"
+          printf 'obj-m += hmbird.o\nhmbird-y := source.o\n' > "$MOD_TMP/Makefile"
+          make -C "$WORK/common" O="$WORK/common/out" M="$MOD_TMP" \
+            ARCH=arm64 LLVM=1 LLVM_IAS=1 KBUILD_MODPOST_WARN=1 modules -j"$(nproc)"
+          mkdir -p "${{ github.workspace }}/dist"
+          cp "$MOD_TMP/hmbird.ko" "${{ github.workspace }}/dist/hmbird_${{ matrix.soc }}.ko"
+
+      - name: 校验并记录 vermagic
+        run: |
+          KO="${{ github.workspace }}/dist/hmbird_${{ matrix.soc }}.ko"
+          file "$KO"
+          VERMAGIC=$(modinfo "$KO" | sed -n 's/^vermagic:[[:space:]]*//p')
+          echo "vermagic: $VERMAGIC"
+          {
+            echo "## hmbird_${{ matrix.soc }}.ko"
+            echo ""
+            echo "- 内核分支：\`${{ matrix.branch }}\`"
+            echo "- vermagic：\`$VERMAGIC\`"
+            echo ""
+          } > "${{ github.workspace }}/dist/notes_${{ matrix.soc }}.md"
+
+      - name: 上传 KO 产物
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.target }}-ko
-          path: bin/*.ko
+          name: hmbird-${{ matrix.soc }}
+          path: |
+            dist/hmbird_${{ matrix.soc }}.ko
+            dist/notes_${{ matrix.soc }}.md
 
-      - name: 提交 bin/*.ko 回仓库
-        if: ${{ github.event.inputs.update_bin == 'yes' }}
+  release:
+    name: 发布 KO Release
+    needs: build
+    if: ${{ always() && github.event.inputs.attach_release == 'yes' && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库（gh CLI 需要 git 上下文）
+        uses: actions/checkout@v4
+
+      - name: 下载全部 KO 产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: hmbird-*
+          merge-multiple: true
+          path: release_ko
+
+      - name: 创建或更新 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add bin/*.ko
-          if git diff --cached --quiet; then
-            echo "KO 无变化，跳过提交"
+          TAG="${{ github.event.inputs.release_tag }}"
+          if [ -z "$TAG" ]; then TAG="ko-${{ github.run_number }}"; fi
+          cat release_ko/notes_*.md > release_notes.md
+          {
+            echo "构建触发：${{ github.actor }}"
+            echo ""
+            echo "运行记录：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } >> release_notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release_ko/hmbird_*.ko --clobber
+            echo "已更新 Release $TAG"
           else
-            git commit -m "build: 重新编译 ${{ github.event.inputs.target }}.ko"
-            git push origin HEAD
+            gh release create "$TAG" release_ko/hmbird_*.ko \
+              --title "$TAG 风驰 KO 云端编译产物" \
+              --notes-file release_notes.md
+            echo "已创建 Release $TAG"
           fi
