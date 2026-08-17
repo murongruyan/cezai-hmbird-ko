@@ -6,8 +6,8 @@
 
 ## 功能
 
-- 开机早期（post-fs-data）自动侧载风驰 KO：按 SoC 从 `bin/hmbird_<soc>.ko` →
-  `bin/hmbird.ko` 候选顺序加载，vermagic 不匹配时自动回退。
+- 开机早期（post-fs-data）自动侧载风驰 KO：按 `hmbird_<soc>_<当前内核版本>.ko` →
+  同 SoC 其它内核版本 → `hmbird.ko` 的候选顺序加载，vermagic 不匹配时自动回退。
 - 仅接受 ColorOS / Realme UI。
 - 按 `ro.soc.model` 自动选择节点类型：
   - `SM8850 / SM8850P / SM8845 / MT6995` → `HMBIRD_EXT`
@@ -112,12 +112,14 @@ KO 与设备内核 ABI 强绑定（vermagic / 符号 CRC），必须用对应机
 MT6995 暂无公开内核源码，暂不支持云端编译；在源码发布前，该机型沿用
 `hmbird.ko` + `soc_model=SM8850` 别名方案（vermagic 可能不匹配，见日志排查）。
 
-产物为 `hmbird_<soc>.ko`，Release 说明里会附该 KO 的 vermagic，可与设备
-`cat /proc/version` 比对确认匹配。
+产物为 `hmbird_<soc>_<内核版本>.ko`（文件名带内核小版本，多个 OTA 版本可共存于
+`bin/`），Release 说明里会附该 KO 的 vermagic，可与设备 `cat /proc/version` 比对确认。
 
 > 提示：KO 与内核 ABI 强绑定，同一 SoC 不同机型 / 不同 OTA 的 vermagic 可能不同；
-> 加载失败（`error:insmod`）时按上文 `kernel_branch` 换成自己机型/OTA 的分支重新编译。
-> 模块开机加载按 `hmbird_<soc>.ko` → `hmbird.ko` 的候选顺序自动回退，多个版本可共存于 `bin/`。
+> 加载失败（`error:insmod`）时按上文 `kernel_branch` + `localversion` 换成自己
+> 机型/OTA 的分支重新编译（`localversion` 填设备 `uname -r` 中版本号之后的部分）。
+> 目前内置版本：sm8850 6.12.23、sm8750 6.6.89 与 6.6.118、sm8650 6.1.118、
+> mt6991 6.6.89、mt6993 6.12.23，另有通用 `hmbird.ko`（RMX5200 6.12）。
 
 ## 发版工作流（GitHub Actions）
 

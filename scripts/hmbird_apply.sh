@@ -94,17 +94,30 @@ write_status() {
 }
 
 ko_candidates() {
-    # 优先使用对应机型内核树云端编译的 KO（vermagic 与设备内核匹配），
-    # 加载失败（多为 vermagic 不匹配）时依次回退，最后回退通用 bin/hmbird.ko。
+    # 按优先级输出候选 KO：
+    #   1) 与当前内核小版本精确匹配的 hmbird_<soc>_<内核版本>.ko（云端按机型/OTA 编译）
+    #   2) 该 SoC 的其它内核版本构建（按文件名序）
+    #   3) 通用 bin/hmbird.ko（RMX5200 6.12 原厂构建）
+    # 加载失败（多为 vermagic 不匹配）时依次回退。
+    soc_tag=
     case "$1" in
-        SM8850|SM8850P|SM8845) printf '%s\n' hmbird_sm8850.ko hmbird.ko ;;
-        SM8750|SM8750P)        printf '%s\n' hmbird_sm8750.ko hmbird.ko ;;
-        SM8650|SM8650P)        printf '%s\n' hmbird_sm8650.ko hmbird.ko ;;
-        MT6991)                printf '%s\n' hmbird_mt6991.ko hmbird.ko ;;
-        MT6993)                printf '%s\n' hmbird_mt6993.ko hmbird.ko ;;
-        MT6995)                printf '%s\n' hmbird.ko ;;
+        SM8850|SM8850P|SM8845) soc_tag=sm8850 ;;
+        SM8750|SM8750P)        soc_tag=sm8750 ;;
+        SM8650|SM8650P)        soc_tag=sm8650 ;;
+        MT6991)                soc_tag=mt6991 ;;
+        MT6993)                soc_tag=mt6993 ;;
+        MT6995)                soc_tag= ;;
         *) return 1 ;;
     esac
+    if [ -n "$soc_tag" ]; then
+        KERNEL_REL=$(uname -r 2>/dev/null | cut -d- -f1)
+        printf '%s\n' "hmbird_${soc_tag}_${KERNEL_REL}.ko"
+        for KO_FILE in "$BIN_DIR"/hmbird_${soc_tag}_*.ko; do
+            [ -f "$KO_FILE" ] || continue
+            printf '%s\n' "${KO_FILE##*/}"
+        done
+    fi
+    printf '%s\n' hmbird.ko
 }
 
 apply_hmbird() {
@@ -146,7 +159,10 @@ apply_hmbird() {
     fi
     rc=1
     LOADED_KO=
+    TRIED=" "
     for KO_NAME in $(ko_candidates "$SOC_MODEL"); do
+        case "$TRIED" in *" $KO_NAME "*) continue ;; esac
+        TRIED="$TRIED$KO_NAME "
         KO_CANDIDATE="$BIN_DIR/$KO_NAME"
         [ -r "$KO_CANDIDATE" ] || continue
         chmod 0600 "$KO_CANDIDATE" 2>/dev/null
