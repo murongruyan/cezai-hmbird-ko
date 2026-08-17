@@ -146,6 +146,12 @@ jobs:
     if: ${{ always() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
+      - name: 检出仓库（gh CLI 需要 git 上下文）
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
       - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
