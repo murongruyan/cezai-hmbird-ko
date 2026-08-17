@@ -17,6 +17,10 @@ on:
         description: '内核源码分支（留空则按 SoC 使用默认最新分支）'
         required: false
         default: ''
+      localversion:
+        description: '内核版本后缀（设备 uname -r 中版本号之后的部分，如 -android15-8-g...-ab...；留空则按 SoC 使用默认值）'
+        required: false
+        default: ''
       attach_release:
         description: '构建完成后发布到 GitHub Release'
         type: choice
@@ -45,22 +49,28 @@ jobs:
         env:
           SOC_INPUT: ${{ github.event.inputs.soc }}
           BRANCH_INPUT: ${{ github.event.inputs.kernel_branch }}
+          LOCALVERSION_INPUT: ${{ github.event.inputs.localversion }}
         shell: python
         run: |
           import json, os
-          # (soc, 内核源码镜像仓库, 默认分支, 工具链 release tag, clang zip 名)
+          # (soc, 内核源码镜像仓库, 默认分支, 工具链 release tag, clang zip 名, 默认 localversion)
+          # localversion 取自 cctv18 构建脚本的 KERNEL_NAME（对应分支真机内核版本后缀）
           targets = [
               ("sm8850", "cctv18/android_kernel_common_oneplus_sm8850",
-               "oneplus/sm8850_v_16.0.0_oneplus_15", "LLVM-Clang19-r536225", "clang-r536225"),
+               "oneplus/sm8850_v_16.0.0_oneplus_15", "LLVM-Clang19-r536225", "clang-r536225",
+               "-android16-5-ga8f88ad96df3-ab13929693-4k"),
               ("sm8750", "cctv18/android_kernel_common_oneplus_sm8750",
-               "oneplus/sm8750_v_16.0.0_oneplus_13_6.6.89", "LLVM-Clang18-r510928", "clang-r510928"),
+               "oneplus/sm8750_v_16.0.0_oneplus_13_6.6.89", "LLVM-Clang18-r510928", "clang-r510928",
+               "-android15-8-g29d86c5fc9dd-abogki428889875-4k"),
               ("sm8650", "cctv18/android_kernel_common_oneplus_sm8650",
-               "oneplus/sm8650_v_15.0.0_oneplus12_6.1.118", "LLVM-Clang18-r510928", "clang-r510928"),
+               "oneplus/sm8650_v_15.0.0_oneplus12_6.1.118", "LLVM-Clang18-r510928", "clang-r510928",
+               ""),
           ]
           soc = os.environ["SOC_INPUT"]
           branch = os.environ["BRANCH_INPUT"].strip()
+          localversion = os.environ["LOCALVERSION_INPUT"].strip()
           include = []
-          for s, repo, default_branch, tag, clang_zip in targets:
+          for s, repo, default_branch, tag, clang_zip, default_lv in targets:
               if soc in ("all", s):
                   include.append({
                       "soc": s,
@@ -68,6 +78,7 @@ jobs:
                       "branch": branch or default_branch,
                       "tag": tag,
                       "clang_zip": clang_zip,
+                      "localversion": localversion or default_lv,
                   })
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write("matrix=" + json.dumps({"include": include}) + "\n")
@@ -121,6 +132,12 @@ jobs:
         run: |
           cd "$WORK/common"
           make O=out ARCH=arm64 LLVM=1 gki_defconfig
+          # 把真机内核版本后缀烤进 CONFIG_LOCALVERSION，保证 vermagic 与设备内核精确匹配
+          if [ -n "${{ matrix.localversion }}" ]; then
+            scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "${{ matrix.localversion }}"
+            scripts/config --file out/.config --disable CONFIG_LOCALVERSION_AUTO
+            make O=out ARCH=arm64 LLVM=1 olddefconfig
+          fi
           make O=out ARCH=arm64 LLVM=1 modules_prepare -j"$(nproc)"
 
       - name: 编译 hmbird.ko
@@ -143,6 +160,7 @@ jobs:
             echo "## hmbird_${{ matrix.soc }}.ko"
             echo ""
             echo "- 内核分支：\`${{ matrix.branch }}\`"
+            echo "- localversion：\`${{ matrix.localversion }}\`"
             echo "- vermagic：\`$VERMAGIC\`"
             echo ""
           } > "${{ github.workspace }}/dist/notes_${{ matrix.soc }}.md"

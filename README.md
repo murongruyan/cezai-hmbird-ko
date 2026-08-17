@@ -85,20 +85,34 @@ KO 编译自 `src/ko/hmbird.c`：`bash src/ko/build.sh hmbird`（需准备目标
 Kbuild 输出，见脚本内环境变量）。当前 `bin/hmbird.ko` 的 SoC 白名单不含 MT6995，
 重新编译加入 MT6995 后，可按上文提示删除 `scripts/hmbird_apply.sh` 里的 insmod 别名。
 
-### 用 GitHub Actions 自动编译
+### 用 GitHub Actions 云端编译（推荐）
 
-编译内核模块必须使用与目标设备匹配的内核树与 Kbuild 输出（体积数 GB），GitHub 云端
-runner 上没有，因此仓库内置的「编译风驰 KO」工作流跑在**自建 runner** 上：
+KO 与设备内核 ABI 强绑定（vermagic / 符号 CRC），必须用对应机型的内核源码编译。
+仓库内置「云端编译风驰 KO」工作流，**纯 GitHub 云端 runner 完成**，借鉴
+[cctv18](https://github.com/cctv18) 的方案：aria2 16 连接拉取内核源码 zip +
+预打包的 LLVM 工具链，只做 `modules_prepare`（不编整个内核），单个 SoC 十几分钟、
+多个 SoC 并行构建。
 
-1. 在装有内核树（如 `/home/murongruyan/android16-kernel-rmx5200`）的 Linux 机器上，
-   打开仓库页 Settings → Actions → Runners → New self-hosted runner，按提示执行
-   `config.sh` 与 `run.sh` 完成注册。
-2. 仓库页 Actions →「编译风驰 KO」→ Run workflow，可指定 `target`（默认 `hmbird`）、
-   内核树/Kbuild/LLVM 路径，以及是否把新 `bin/*.ko` 提交回仓库（`update_bin=yes`）。
-3. 编译产物 `bin/*.ko` 会作为构建附件（artifact）上传，可下载核对。
+用法：仓库页 Actions →「云端编译风驰 KO」→ Run workflow：
 
-> 注意：KO 与设备内核 ABI 强绑定（vermagic / 符号 CRC），编译产物只适用于对应机型的
-> 内核版本；为其它 SoC（如 MT6995）编译需换成该设备的内核树与 Kbuild 输出。
+- `soc`：`all` / `sm8850` / `sm8750` / `sm8650`；
+- `kernel_branch`：留空用下表默认分支；设备 OTA 与默认分支不一致时，填对应分支
+  （分支列表见各镜像仓库）；
+- `attach_release`：`yes` 时把编译产物发布到 GitHub Release。
+
+| SoC | 默认内核源码分支（cctv18 镜像） | 工具链 |
+| --- | --- | --- |
+| sm8850 | `oneplus/sm8850_v_16.0.0_oneplus_15`（6.12） | LLVM Clang 19 |
+| sm8750 | `oneplus/sm8750_v_16.0.0_oneplus_13_6.6.89`（6.6） | LLVM Clang 18 |
+| sm8650 | `oneplus/sm8650_v_15.0.0_oneplus12_6.1.118`（6.1） | LLVM Clang 18 |
+
+产物为 `hmbird_<soc>.ko`，Release 说明里会附该 KO 的 vermagic，可与设备
+`cat /proc/version` 比对确认匹配。
+
+> 提示：KO 与内核 ABI 强绑定，同一 SoC 不同机型 / 不同 OTA 的 vermagic 可能不同；
+> 加载失败（`error:insmod`）时按上文 `kernel_branch` 换成自己机型/OTA 的分支重新编译。
+> 模块开机加载按 `hmbird_sm8850.ko` → `hmbird_sm8750.ko` → `hmbird_sm8650.ko` →
+> `hmbird.ko` 的候选顺序自动回退，多个版本可共存于 `bin/`。
 
 ## 发版工作流（GitHub Actions）
 

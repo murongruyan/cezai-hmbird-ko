@@ -93,8 +93,20 @@ write_status() {
     printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$1" >> "$LOG_FILE"
 }
 
+ko_candidates() {
+    # 优先使用对应机型内核树云端编译的 KO（vermagic 与设备内核匹配），
+    # 加载失败（多为 vermagic 不匹配）时依次回退，最后回退通用 bin/hmbird.ko。
+    case "$1" in
+        SM8850|SM8850P|SM8845) printf '%s\n' hmbird_sm8850.ko hmbird.ko ;;
+        SM8750|SM8750P)        printf '%s\n' hmbird_sm8750.ko hmbird.ko ;;
+        SM8650|SM8650P)        printf '%s\n' hmbird_sm8650.ko hmbird.ko ;;
+        MT6991|MT6993|MT6995)  printf '%s\n' hmbird.ko ;;
+        *) return 1 ;;
+    esac
+}
+
 apply_hmbird() {
-    [ -r "$KO_MODULE" ] || {
+    ls "$BIN_DIR"/hmbird*.ko >/dev/null 2>&1 || {
         write_status blocked:ko_missing
         return 0
     }
@@ -130,10 +142,24 @@ apply_hmbird() {
         printf '%s soc_model=MT6995 insmod_alias=SM8850\n' \
             "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" >> "$LOG_FILE"
     fi
-    insmod "$KO_MODULE" enable=1 probe_only=0 \
-        dynamic_of="$DYNAMIC_OF" ui_family="$UI_FAMILY" soc_model="$KO_SOC_MODEL" hmbird_type="$HMBIRD_TYPE" \
-        >/dev/null 2>&1
-    rc=$?
+    rc=1
+    LOADED_KO=
+    for KO_NAME in $(ko_candidates "$SOC_MODEL"); do
+        KO_CANDIDATE="$BIN_DIR/$KO_NAME"
+        [ -r "$KO_CANDIDATE" ] || continue
+        chmod 0600 "$KO_CANDIDATE" 2>/dev/null
+        insmod "$KO_CANDIDATE" enable=1 probe_only=0 \
+            dynamic_of="$DYNAMIC_OF" ui_family="$UI_FAMILY" soc_model="$KO_SOC_MODEL" hmbird_type="$HMBIRD_TYPE" \
+            >/dev/null 2>&1
+        rc=$?
+        if [ "$rc" -eq 0 ]; then
+            LOADED_KO=$KO_NAME
+            break
+        fi
+        # 典型原因：vermagic 与设备内核不匹配（KO 编译自其它机型/OTA 分支），换下一个候选
+        printf '%s candidate=%s insmod_rc=%s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$KO_NAME" "$rc" >> "$LOG_FILE"
+    done
     if [ "$rc" -ne 0 ]; then
         write_status error:insmod:$rc
         return 0
@@ -143,7 +169,7 @@ apply_hmbird() {
     selected_type=$(cat "$SYS_MODULE_ROOT/hmbird/parameters/selected_type" 2>/dev/null)
     reinit=$(cat "$SYS_MODULE_ROOT/hmbird/parameters/consumer_reinit_supported" 2>/dev/null)
     if [ "$node_present" = Y ] || [ "$node_present" = 1 ]; then
-        write_status "applied:node_present=$node_present,node_created=$node_created,type=$selected_type,consumer_reinit=$reinit"
+        write_status "applied:ko=$LOADED_KO,node_present=$node_present,node_created=$node_created,type=$selected_type,consumer_reinit=$reinit"
     else
         write_status "error:node_missing:type=$selected_type"
     fi
