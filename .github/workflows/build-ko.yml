@@ -98,16 +98,22 @@ jobs:
                   if (soc, branch) in seen:
                       continue
                   seen.add((soc, branch))
-                  include.append({
-                      "soc": soc,
-                      "variant": f"{soc}-{branch.split('/')[-1]}",
-                      "repo": repo,
-                      "repo_dir": repo.split("/")[-1],
-                      "branch": branch_override or branch,
-                      "tag": cfg["clang_tag_by_soc"][soc],
-                      "clang_zip": cfg["clang_zip_by_soc"][soc],
-                      "localversion": lv_override or cfg["localversion_by_branch"].get(branch, ""),
-                  })
+                  # 一个分支可能对应多个 OTA 构建号（localversion 列表），逐个生成腿
+                  lvs = lv_override or cfg["localversion_by_branch"].get(branch, "")
+                  if not isinstance(lvs, list):
+                      lvs = [lvs]
+                  for idx, lv in enumerate(lvs):
+                      suffix = "" if len(lvs) == 1 else f"-{idx + 1}"
+                      include.append({
+                          "soc": soc,
+                          "variant": f"{soc}-{branch.split('/')[-1]}{suffix}",
+                          "repo": repo,
+                          "repo_dir": repo.split("/")[-1],
+                          "branch": branch_override or branch,
+                          "tag": cfg["clang_tag_by_soc"][soc],
+                          "clang_zip": cfg["clang_zip_by_soc"][soc],
+                          "localversion": lv,
+                      })
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write("matrix=" + json.dumps({"include": include}) + "\n")
 
