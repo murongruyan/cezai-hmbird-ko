@@ -85,6 +85,21 @@ KO 编译自 `src/ko/hmbird.c`：`bash src/ko/build.sh hmbird`（需准备目标
 Kbuild 输出，见脚本内环境变量）。当前 `bin/hmbird.ko` 的 SoC 白名单不含 MT6995，
 重新编译加入 MT6995 后，可按上文提示删除 `scripts/hmbird_apply.sh` 里的 insmod 别名。
 
+### 用 GitHub Actions 自动编译
+
+编译内核模块必须使用与目标设备匹配的内核树与 Kbuild 输出（体积数 GB），GitHub 云端
+runner 上没有，因此仓库内置的「编译风驰 KO」工作流跑在**自建 runner** 上：
+
+1. 在装有内核树（如 `/home/murongruyan/android16-kernel-rmx5200`）的 Linux 机器上，
+   打开仓库页 Settings → Actions → Runners → New self-hosted runner，按提示执行
+   `config.sh` 与 `run.sh` 完成注册。
+2. 仓库页 Actions →「编译风驰 KO」→ Run workflow，可指定 `target`（默认 `hmbird`）、
+   内核树/Kbuild/LLVM 路径，以及是否把新 `bin/*.ko` 提交回仓库（`update_bin=yes`）。
+3. 编译产物 `bin/*.ko` 会作为构建附件（artifact）上传，可下载核对。
+
+> 注意：KO 与设备内核 ABI 强绑定（vermagic / 符号 CRC），编译产物只适用于对应机型的
+> 内核版本；为其它 SoC（如 MT6995）编译需换成该设备的内核树与 Kbuild 输出。
+
 ## 发版工作流（GitHub Actions）
 
 仓库内置自动化发版，两种用法：

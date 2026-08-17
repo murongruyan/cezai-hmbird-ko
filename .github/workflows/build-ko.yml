@@ -1,0 +1,62 @@
+name: 编译风驰 KO
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'build.sh 构建目标（默认 hmbird）'
+        required: false
+        default: 'hmbird'
+      kernel_tree:
+        description: '内核树路径（自建 runner 上）'
+        required: false
+        default: '/home/murongruyan/android16-kernel-rmx5200'
+      kernel_out:
+        description: 'Kbuild 输出目录（含 include/generated）'
+        required: false
+        default: '/home/murongruyan/rmx5200-kernel-out'
+      llvm_tools:
+        description: 'LLVM 工具目录'
+        required: false
+        default: '/home/murongruyan/localtools/usr/bin'
+      update_bin:
+        description: '编译成功后是否把 bin/*.ko 提交回仓库（yes/no）'
+        required: false
+        default: 'no'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: 编译 KO（自建 runner）
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 编译 KO
+        env:
+          KERNEL_TREE: ${{ github.event.inputs.kernel_tree }}
+          KERNEL_OUT: ${{ github.event.inputs.kernel_out }}
+          LLVM_TOOLS: ${{ github.event.inputs.llvm_tools }}
+        run: bash src/ko/build.sh "${{ github.event.inputs.target }}"
+
+      - name: 上传 KO 构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.target }}-ko
+          path: bin/*.ko
+
+      - name: 提交 bin/*.ko 回仓库
+        if: ${{ github.event.inputs.update_bin == 'yes' }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bin/*.ko
+          if git diff --cached --quiet; then
+            echo "KO 无变化，跳过提交"
+          else
+            git commit -m "build: 重新编译 ${{ github.event.inputs.target }}.ko"
+            git push origin HEAD
+          fi
