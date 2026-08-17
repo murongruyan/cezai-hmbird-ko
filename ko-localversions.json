@@ -9,6 +9,7 @@
     "cctv18/android_kernel_oppo_mt6993"
   ],
   "skip_patterns": ["_bak", "_dev", "test_"],
+  "skip_branches": [],
   "soc_by_repo": {
     "cctv18/android_kernel_common_oneplus_sm8650": "sm8650",
     "cctv18/android_kernel_common_oneplus_sm8750": "sm8750",

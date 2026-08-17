@@ -86,8 +86,11 @@ jobs:
           seen = set()
           for repo, names in branches_by_repo.items():
               for branch in names:
-                  # 跳过备份/开发/测试分支，只构建官方发布分支
+                  # 跳过备份/开发/测试分支，只构建官方发布分支；
+                  # 跳过镜像不完整（缺 vendor Kconfig 目录，无法生成配置）的分支
                   if any(p in branch for p in cfg["skip_patterns"]):
+                      continue
+                  if branch in cfg.get("skip_branches", []):
                       continue
                   soc = cfg["soc_override_by_branch"].get(branch, cfg["soc_by_repo"][repo])
                   if soc_input not in ("all", soc):
@@ -166,7 +169,27 @@ jobs:
       - name: 配置内核并 prepare（只需头文件与脚本，不编整个内核）
         run: |
           cd "$WORK/common"
-          make O=out ARCH=arm64 LLVM=1 gki_defconfig
+          # 官方源码分 common + vendor(模块/设备树) 两个包；部分分支的镜像只有 common
+          # 包，其 Kconfig 引用了缺失的 vendor 目录（如 drivers/soc/oplus/oplus_resctrl）。
+          # hmbird.ko 只依赖核心内核头文件，vendor 驱动一个都不需要，因此自动剔除
+          # 缺失的 vendor Kconfig 引用后重试，配置仍可正常生成。
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if make O=out ARCH=arm64 LLVM=1 gki_defconfig 2>cfg_err.log; then
+              break
+            fi
+            missing=$(grep -oE 'can.t open file "[^"]+"' cfg_err.log | head -n1 | sed -E 's/.*"([^"]+)"/\1/')
+            if [ -z "$missing" ]; then
+              echo "配置失败且无法定位缺失文件："
+              tail -n 20 cfg_err.log
+              exit 1
+            fi
+            echo "vendor 源缺失：$missing，移除其 Kconfig 引用后重试"
+            grep -rlF "$missing" --include=Kconfig --exclude-dir=out . 2>/dev/null | while IFS= read -r f; do
+              sed -i "\\|${missing}|d" "$f"
+            done
+            rm -rf out
+          done
+          [ -f out/.config ] || { echo "defconfig 生成失败"; exit 1; }
           # 内核树位于本仓库工作区内，setlocalversion 会向上找到本仓库 .git 并混入
           # 无关哈希，必须禁用 AUTO；再把真机版本后缀烤进 CONFIG_LOCALVERSION，
           # 保证 vermagic 与设备内核精确匹配。
