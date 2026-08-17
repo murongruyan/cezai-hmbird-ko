@@ -6,16 +6,18 @@
 
 ## 功能
 
-- 开机早期（post-fs-data）自动侧载风驰 KO：按 `hmbird_<soc>_<当前内核版本>.ko` →
-  同 SoC 其它内核版本 → `hmbird.ko` 的候选顺序加载，vermagic 不匹配时自动回退。
+- 开机早期（post-fs-data）**只校验**风驰 KO（与「慕容显示增强」原脚本一致）：
+  按 `hmbird_<soc>_<uname -r>.ko` → 同 SoC 其它内核版本 → `hmbird.ko` 的候选顺序
+  加载，`probe_only=1` 仅校验 DTBO 已有节点并复用，**不在开机阶段动态创建节点**。
 - 仅接受 ColorOS / Realme UI。
 - 按 `ro.soc.model` 自动选择节点类型：
   - `SM8850 / SM8850P / SM8845 / MT6995` → `HMBIRD_EXT`
   - `SM8750 / SM8750P / SM8650 / SM8650P / MT6991 / MT6993` → `HMBIRD_OGKI`
-- 每次开机自动重设设备云控 ID（`ro.boot.prjname`），**只改属性，不清数据、不重启服务**；
-  刷入时（customize.sh）另执行一次完整的 COSA 刷新流程（见下）。
-- DTBO 已有风驰节点时只校验并复用，不重复创建；否则在内核暴露完整
-  `of_changeset_*` API 时创建动态节点。
+- 系统启动完成后（service.sh，`sys.boot_completed=1`）自动重设设备云控 ID
+  （`ro.boot.prjname`），**只改属性，不清数据、不重启服务**；刷入时（customize.sh）
+  另执行一次完整的 COSA 刷新流程（见下）。
+- DTBO 没有风驰节点时，可在系统启动完成后手动执行
+  `scripts/hmbird_apply.sh apply-create` 动态创建（`of_changeset`），不影响开机。
 - 加载状态与日志写入 `runtime/` 下的 `status.txt` / `runtime.log`（KO）与
   `prjname_status.txt` / `prjname.log`（云控 ID）。
 
@@ -29,10 +31,11 @@
 | MT6991 / MT6993 | 24813 | HMBIRD_OGKI |
 | MT6995 | 25815 | HMBIRD_EXT |
 
-## 开机自动重设（post-fs-data）
+## 开机自动重设（service.sh）
 
-每次开机，`scripts/prjname_apply.sh` 按上表对 `ro.boot.prjname` 执行
-`resetprop`（优先 KernelSU 自带 resetprop，其次 Magisk）并校验生效。
+系统完全启动后（`sys.boot_completed=1`，与原 APK 手动设置时机一致），
+`scripts/prjname_apply.sh` 按上表对 `ro.boot.prjname` 执行 `resetprop`
+（优先 KernelSU 自带 resetprop，其次 Magisk）并校验生效。
 只改属性，不清除 `com.oplus.cosa` 数据、不重启游戏助手服务。
 
 ## 刷入脚本（customize.sh）
@@ -66,6 +69,12 @@ sh "$MODDIR/scripts/hmbird_apply.sh" status
 sh "$MODDIR/scripts/prjname_apply.sh" status
 cat "$MODDIR/runtime/status.txt"
 cat "$MODDIR/runtime/prjname_status.txt"
+```
+
+DTBO 没有风驰节点、需要动态创建时（系统启动完成后手动执行，不影响开机）：
+
+```sh
+sh "$MODDIR/scripts/hmbird_apply.sh" apply-create
 ```
 
 KO 常见状态：

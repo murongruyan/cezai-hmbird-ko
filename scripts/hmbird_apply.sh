@@ -123,6 +123,9 @@ ko_candidates() {
 }
 
 apply_hmbird() {
+    # 与「慕容显示增强」原脚本一致：开机阶段只校验 DTBO 里已有的风驰节点并复用，
+    # 绝不在 post-fs-data 阶段用 of_changeset 动态创建节点（避免影响开机流程）。
+    # 动态创建仅在用户明确执行 apply-create（系统启动完成后）时才进行。
     ls "$BIN_DIR"/hmbird*.ko >/dev/null 2>&1 || {
         write_status blocked:ko_missing
         return 0
@@ -168,7 +171,7 @@ apply_hmbird() {
         KO_CANDIDATE="$BIN_DIR/$KO_NAME"
         [ -r "$KO_CANDIDATE" ] || continue
         chmod 0600 "$KO_CANDIDATE" 2>/dev/null
-        insmod "$KO_CANDIDATE" enable=1 probe_only=0 \
+        insmod "$KO_CANDIDATE" enable=1 probe_only="$PROBE_ONLY" \
             dynamic_of="$DYNAMIC_OF" ui_family="$UI_FAMILY" soc_model="$KO_SOC_MODEL" hmbird_type="$HMBIRD_TYPE" \
             >/dev/null 2>&1
         rc=$?
@@ -196,14 +199,21 @@ apply_hmbird() {
     return 0
 }
 
+PROBE_ONLY=1
+
 case "$1" in
     apply) apply_hmbird ;;
+    apply-create)
+        # 手动模式：系统启动完成后调用，允许在无 DTBO 节点时动态创建（of_changeset）
+        PROBE_ONLY=0
+        apply_hmbird
+        ;;
     status)
         printf 'feature=sideload_hmbird\n'
         [ -f "$STATUS_FILE" ] && printf 'status=%s\n' "$(sed -n '1p' "$STATUS_FILE")" || printf 'status=unknown\n'
         ;;
     *)
-        echo "Usage: $0 {apply|status}" >&2
+        echo "Usage: $0 {apply|apply-create|status}" >&2
         exit 64
         ;;
 esac

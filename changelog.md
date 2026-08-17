@@ -1,5 +1,14 @@
 # 更新日志
 
+## v1.7
+
+- **修复不开机问题（对齐原脚本设计）**：风驰节点在开机早期只做校验复用
+  （`probe_only=1`），不再于 post-fs-data 阶段用 of_changeset 动态创建节点；
+  动态创建改为系统启动完成后手动执行 `scripts/hmbird_apply.sh apply-create`。
+- `ro.boot.prjname` 自动重设从 post-fs-data 挪到 `service.sh`
+  （等 `sys.boot_completed=1` 后执行），与原 APK 手动设置时机一致，
+  不再在开机早期触碰敏感属性。
+
 ## v1.6
 
 - **修复关键缺陷**：`oplus,hmbird` 子节点名随类型不同——HMBIRD_OGKI（SM8750 及
