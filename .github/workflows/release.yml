@@ -85,6 +85,8 @@ jobs:
   build:
     name: 打包模块 ZIP 并截取更新日志
     needs: bump
+    # bump 在推 tag 触发或被跳过时仍需继续打包（GitHub 默认会级联跳过依赖任务）
+    if: ${{ always() && needs.bump.result != 'failure' }}
     runs-on: ubuntu-latest
     steps:
       - name: 检出仓库
@@ -141,6 +143,7 @@ jobs:
   release:
     name: 发布 GitHub Release
     needs: build
+    if: ${{ always() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: 下载构建产物
