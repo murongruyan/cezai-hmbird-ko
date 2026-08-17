@@ -269,12 +269,27 @@ jobs:
             echo ""
             echo "运行记录：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           } >> release_notes.md
+          # GitHub API 偶发 503，发布与上传都带重试
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" release_ko/hmbird_*.ko --clobber
-            echo "已更新 Release $TAG"
+            for i in 1 2 3 4 5; do
+              if gh release upload "$TAG" release_ko/hmbird_*.ko --clobber; then
+                echo "已更新 Release $TAG"
+                exit 0
+              fi
+              echo "上传失败（第 $i 次），10 秒后重试..."
+              sleep 10
+            done
+            exit 1
           else
-            gh release create "$TAG" release_ko/hmbird_*.ko \
-              --title "$TAG 风驰 KO 云端编译产物" \
-              --notes-file release_notes.md
-            echo "已创建 Release $TAG"
+            for i in 1 2 3 4 5; do
+              if gh release create "$TAG" release_ko/hmbird_*.ko \
+                  --title "$TAG 风驰 KO 云端编译产物" \
+                  --notes-file release_notes.md; then
+                echo "已创建 Release $TAG"
+                exit 0
+              fi
+              echo "创建失败（第 $i 次），10 秒后重试..."
+              sleep 10
+            done
+            exit 1
           fi
