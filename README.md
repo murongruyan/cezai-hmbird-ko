@@ -106,14 +106,18 @@ KO 与设备内核 ABI 强绑定（vermagic / 符号 CRC），必须用对应机
 | sm8850 | `oneplus/sm8850_v_16.0.0_oneplus_15`（6.12） | LLVM Clang 19 |
 | sm8750 | `oneplus/sm8750_v_16.0.0_oneplus_13_6.6.89`（6.6） | LLVM Clang 18 |
 | sm8650 | `oneplus/sm8650_v_15.0.0_oneplus12_6.1.118`（6.1） | LLVM Clang 18 |
+| mt6991 | `oneplus/mt6991_v_15.0.2_ace5_ultra_6.6.89`（6.6，天玑9400+） | LLVM Clang 18 |
+| mt6993 | `oppo/mt6993_b_16.0.0_find_x9`（6.12，天玑9500） | LLVM Clang 19 |
+
+MT6995 暂无公开内核源码，暂不支持云端编译；在源码发布前，该机型沿用
+`hmbird.ko` + `soc_model=SM8850` 别名方案（vermagic 可能不匹配，见日志排查）。
 
 产物为 `hmbird_<soc>.ko`，Release 说明里会附该 KO 的 vermagic，可与设备
 `cat /proc/version` 比对确认匹配。
 
 > 提示：KO 与内核 ABI 强绑定，同一 SoC 不同机型 / 不同 OTA 的 vermagic 可能不同；
 > 加载失败（`error:insmod`）时按上文 `kernel_branch` 换成自己机型/OTA 的分支重新编译。
-> 模块开机加载按 `hmbird_sm8850.ko` → `hmbird_sm8750.ko` → `hmbird_sm8650.ko` →
-> `hmbird.ko` 的候选顺序自动回退，多个版本可共存于 `bin/`。
+> 模块开机加载按 `hmbird_<soc>.ko` → `hmbird.ko` 的候选顺序自动回退，多个版本可共存于 `bin/`。
 
 ## 发版工作流（GitHub Actions）
 

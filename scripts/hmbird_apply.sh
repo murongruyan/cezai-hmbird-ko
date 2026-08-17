@@ -100,7 +100,9 @@ ko_candidates() {
         SM8850|SM8850P|SM8845) printf '%s\n' hmbird_sm8850.ko hmbird.ko ;;
         SM8750|SM8750P)        printf '%s\n' hmbird_sm8750.ko hmbird.ko ;;
         SM8650|SM8650P)        printf '%s\n' hmbird_sm8650.ko hmbird.ko ;;
-        MT6991|MT6993|MT6995)  printf '%s\n' hmbird.ko ;;
+        MT6991)                printf '%s\n' hmbird_mt6991.ko hmbird.ko ;;
+        MT6993)                printf '%s\n' hmbird_mt6993.ko hmbird.ko ;;
+        MT6995)                printf '%s\n' hmbird.ko ;;
         *) return 1 ;;
     esac
 }
