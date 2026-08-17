@@ -1,0 +1,167 @@
+name: 打包发布 Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '新版本号（如 1.3；留空则沿用 module.prop 当前版本）'
+        required: false
+        default: ''
+      version_code:
+        description: '新 versionCode（留空则保持不变）'
+        required: false
+        default: ''
+      changelog:
+        description: '本版本更新日志（留空则自动从 changelog.md / 提交记录截取）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    name: 修改版本号并打 tag
+    if: github.event_name == 'workflow_dispatch' && (github.event.inputs.version != '' || github.event.inputs.version_code != '')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 更新 module.prop 与 changelog.md
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version }}
+          VERSION_CODE_INPUT: ${{ github.event.inputs.version_code }}
+          CHANGELOG_INPUT: ${{ github.event.inputs.changelog }}
+        run: |
+          VERSION=$(printf '%s' "$VERSION_INPUT" | sed 's/^[vV]//' | tr -d '[:space:]')
+          CODE=$(printf '%s' "$VERSION_CODE_INPUT" | tr -d '[:space:]')
+          OLD_VERSION=$(grep -m1 '^version=' module.prop | cut -d= -f2-)
+          OLD_CODE=$(grep -m1 '^versionCode=' module.prop | cut -d= -f2-)
+          if [ -n "$VERSION" ]; then
+            sed -i "s|^version=.*|version=${VERSION}|" module.prop
+            NEW_VERSION="$VERSION"
+          else
+            NEW_VERSION="$OLD_VERSION"
+          fi
+          if [ -n "$CODE" ]; then
+            sed -i "s|^versionCode=.*|versionCode=${CODE}|" module.prop
+            NEW_CODE="$CODE"
+          else
+            NEW_CODE="$OLD_CODE"
+          fi
+          if [ -n "$CHANGELOG_INPUT" ]; then
+            {
+              printf '## v%s\n\n' "$NEW_VERSION"
+              printf '%s\n' "$CHANGELOG_INPUT"
+              printf '\n'
+              cat changelog.md
+            } > changelog.md.tmp
+            mv changelog.md.tmp changelog.md
+          fi
+          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+          echo "NEW_CODE=$NEW_CODE" >> "$GITHUB_ENV"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add module.prop changelog.md
+          if git diff --cached --quiet; then
+            echo "NO_CHANGE=true" >> "$GITHUB_ENV"
+          else
+            git commit -m "release: bump to v${NEW_VERSION} (versionCode ${NEW_CODE})"
+          fi
+
+      - name: 打 tag 并推送
+        run: |
+          git tag -d "v$NEW_VERSION" 2>/dev/null || true
+          git tag "v$NEW_VERSION"
+          git push origin HEAD
+          git push origin "refs/tags/v$NEW_VERSION"
+
+  build:
+    name: 打包模块 ZIP 并截取更新日志
+    needs: bump
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+        with:
+          # 手动发版时 bump 已推送新提交，按分支/tag 名检出到最新状态，
+          # 避免打包到触发时点的旧 SHA。
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: 读取版本
+        run: |
+          VERSION=$(grep -m1 '^version=' module.prop | cut -d= -f2-)
+          VERSION_CODE=$(grep -m1 '^versionCode=' module.prop | cut -d= -f2-)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+
+      - name: 打包模块 ZIP
+        run: |
+          mkdir -p dist/module
+          cp module.prop customize.sh post-fs-data.sh README.md LICENSE dist/module/
+          cp -r bin scripts dist/module/
+          cd dist/module
+          zip -q -r "../sideload-hmbird-ko-v${VERSION}.zip" .
+          cd ..
+          rm -rf module
+          echo "ZIP=sideload-hmbird-ko-v${VERSION}.zip" >> "$GITHUB_ENV"
+
+      - name: 自动截取更新日志
+        run: |
+          VPAT=$(printf '%s' "$VERSION" | sed 's/[.]/\\./g')
+          if grep -q "^## v${VPAT}[[:space:]]*$" changelog.md; then
+            awk -v v="^## v${VPAT}[[:space:]]*$" '
+              $0 ~ v { found=1; print; next }
+              found && /^## / { exit }
+              found { print }
+            ' changelog.md > dist/release_notes.md
+          else
+            PREV=$(git describe --tags --abbrev=0 "v${VERSION}^" 2>/dev/null || true)
+            if [ -n "$PREV" ]; then
+              git log --pretty=format:'- %s' "$PREV"..HEAD > dist/release_notes.md
+            else
+              git log --pretty=format:'- %s' > dist/release_notes.md
+            fi
+          fi
+          echo "release notes lines: $(wc -l < dist/release_notes.md)"
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: module-release
+          path: dist/
+
+  release:
+    name: 发布 GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: module-release
+          path: dist
+
+      - name: 创建或更新 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ZIP=$(ls dist/*.zip)
+          VERSION=$(basename "$ZIP" .zip | sed 's/^sideload-hmbird-ko-v//')
+          TAG="v$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" --clobber
+            echo "已更新 Release $TAG 的附件"
+          else
+            gh release create "$TAG" "$ZIP" \
+              --title "$TAG 侧载风驰ko" \
+              --notes-file dist/release_notes.md
+            echo "已创建 Release $TAG"
+          fi
