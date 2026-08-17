@@ -6,7 +6,8 @@
 
 ## 功能
 
-- 开机早期（post-fs-data）自动侧载 `bin/hmbird.ko`。
+- 开机早期（post-fs-data）自动侧载风驰 KO：按 SoC 从 `bin/hmbird_<soc>.ko` →
+  `bin/hmbird.ko` 候选顺序加载，vermagic 不匹配时自动回退。
 - 仅接受 ColorOS / Realme UI。
 - 按 `ro.soc.model` 自动选择节点类型：
   - `SM8850 / SM8850P / SM8845 / MT6995` → `HMBIRD_EXT`

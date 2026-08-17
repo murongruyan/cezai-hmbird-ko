@@ -104,20 +104,30 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends \
             libelf-dev libdw-dev bc bison flex aria2 unzip kmod
 
-      - name: 拉取内核源码与工具链（aria2 多线程）
+      - name: 拉取内核源码与工具链（aria2 多线程，带重试与完整性校验）
         run: |
           mkdir -p "$WORK" && cd "$WORK"
+          fetch_zip() {
+            # $1 = url, $2 = 输出文件名；下载后用 unzip -t 校验，失败重试 5 次
+            for i in 1 2 3 4 5; do
+              if aria2c -q -s16 -x16 -k1M --allow-overwrite=true "$1" -o "$2" &&
+                 unzip -tq "$2" >/dev/null 2>&1; then
+                return 0
+              fi
+              echo "下载或校验失败（第 $i 次）：$1"
+              rm -f "$2"
+              sleep 5
+            done
+            return 1
+          }
           # 借鉴 cctv18 方案：aria2 16 连接拉取内核源码 zip（比 git clone 快得多）
-          aria2c -q -s16 -x16 -k1M \
-            "https://github.com/${{ matrix.repo }}/archive/refs/heads/${{ matrix.branch }}.zip" \
-            -o common.zip &
-          aria2c -q -s16 -x16 -k1M \
-            "https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/${{ matrix.tag }}/${{ matrix.clang_zip }}.zip" \
-            -o clang.zip &
-          aria2c -q -s16 -x16 -k1M \
-            "https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/${{ matrix.tag }}/build-tools.zip" \
-            -o build-tools.zip &
-          wait
+          pids=""
+          fetch_zip "https://github.com/${{ matrix.repo }}/archive/refs/heads/${{ matrix.branch }}.zip" common.zip & pids="$pids $!"
+          fetch_zip "https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/${{ matrix.tag }}/${{ matrix.clang_zip }}.zip" clang.zip & pids="$pids $!"
+          fetch_zip "https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/${{ matrix.tag }}/build-tools.zip" build-tools.zip & pids="$pids $!"
+          fail=0
+          for p in $pids; do wait "$p" || fail=1; done
+          [ "$fail" = 0 ] || exit 1
           unzip -q common.zip
           unzip -q clang.zip -d clang
           unzip -q build-tools.zip -d build-tools
@@ -132,12 +142,14 @@ jobs:
         run: |
           cd "$WORK/common"
           make O=out ARCH=arm64 LLVM=1 gki_defconfig
-          # 把真机内核版本后缀烤进 CONFIG_LOCALVERSION，保证 vermagic 与设备内核精确匹配
+          # 内核树位于本仓库工作区内，setlocalversion 会向上找到本仓库 .git 并混入
+          # 无关哈希，必须禁用 AUTO；再把真机版本后缀烤进 CONFIG_LOCALVERSION，
+          # 保证 vermagic 与设备内核精确匹配。
+          scripts/config --file out/.config --disable CONFIG_LOCALVERSION_AUTO
           if [ -n "${{ matrix.localversion }}" ]; then
             scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "${{ matrix.localversion }}"
-            scripts/config --file out/.config --disable CONFIG_LOCALVERSION_AUTO
-            make O=out ARCH=arm64 LLVM=1 olddefconfig
           fi
+          make O=out ARCH=arm64 LLVM=1 olddefconfig
           make O=out ARCH=arm64 LLVM=1 modules_prepare -j"$(nproc)"
 
       - name: 编译 hmbird.ko
