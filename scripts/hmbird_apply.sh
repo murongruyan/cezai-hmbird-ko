@@ -101,7 +101,8 @@ ko_candidates() {
     # 加载失败（多为 vermagic 不匹配）时依次回退。
     soc_tag=
     case "$1" in
-        SM8850|SM8850P|SM8845) soc_tag=sm8850 ;;
+        SM8850|SM8850P)        soc_tag=sm8850 ;;
+        SM8845)                soc_tag=sm8845 ;;
         SM8750|SM8750P)        soc_tag=sm8750 ;;
         SM8650|SM8650P)        soc_tag=sm8650 ;;
         MT6991)                soc_tag=mt6991 ;;
@@ -110,8 +111,9 @@ ko_candidates() {
         *) return 1 ;;
     esac
     if [ -n "$soc_tag" ]; then
-        KERNEL_REL=$(uname -r 2>/dev/null | cut -d- -f1)
-        printf '%s\n' "hmbird_${soc_tag}_${KERNEL_REL}.ko"
+        # 用完整 uname -r（含 GKI 版本与厂商 build ID）精确匹配对应 OTA 的 KO
+        KERNEL_STR=$(uname -r 2>/dev/null | sed 's/[[:space:]].*$//')
+        printf '%s\n' "hmbird_${soc_tag}_${KERNEL_STR}.ko"
         for KO_FILE in "$BIN_DIR"/hmbird_${soc_tag}_*.ko; do
             [ -f "$KO_FILE" ] || continue
             printf '%s\n' "${KO_FILE##*/}"

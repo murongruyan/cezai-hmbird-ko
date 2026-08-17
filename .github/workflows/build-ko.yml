@@ -4,23 +4,24 @@ on:
   workflow_dispatch:
     inputs:
       soc:
-        description: '目标 SoC（all=全部并行构建）'
+        description: '目标 SoC（all=全版本矩阵批量构建；也可选单个 SoC 的所有已知版本）'
         type: choice
         required: true
         default: 'all'
         options:
           - 'all'
           - 'sm8850'
+          - 'sm8845'
           - 'sm8750'
           - 'sm8650'
           - 'mt6991'
           - 'mt6993'
       kernel_branch:
-        description: '内核源码分支（留空则按 SoC 使用默认最新分支）'
+        description: '覆盖内核源码分支（留空则用 ko-targets.json 中该版本的分支）'
         required: false
         default: ''
       localversion:
-        description: '内核版本后缀（设备 uname -r 中版本号之后的部分，如 -android15-8-g...-ab...；留空则按 SoC 使用默认值）'
+        description: '覆盖内核版本后缀（设备 uname -r 中版本号之后的部分，如 -android15-8-g...-ab...；留空则用表中默认值）'
         required: false
         default: ''
       attach_release:
@@ -46,7 +47,10 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
-      - name: 生成矩阵
+      - name: 检出本仓库
+        uses: actions/checkout@v4
+
+      - name: 从 ko-targets.json 生成矩阵
         id: matrix
         env:
           SOC_INPUT: ${{ github.event.inputs.soc }}
@@ -55,45 +59,26 @@ jobs:
         shell: python
         run: |
           import json, os
-          # (soc, 内核源码镜像仓库, 默认分支, 工具链 release tag, clang zip 名, 默认 localversion)
-          # localversion 取自 cctv18 构建脚本的 KERNEL_NAME（对应分支真机内核版本后缀）
-          targets = [
-              ("sm8850", "cctv18/android_kernel_common_oneplus_sm8850",
-               "oneplus/sm8850_v_16.0.0_oneplus_15", "LLVM-Clang19-r536225", "clang-r536225",
-               "-android16-5-ga8f88ad96df3-ab13929693-4k"),
-              ("sm8750", "cctv18/android_kernel_common_oneplus_sm8750",
-               "oneplus/sm8750_v_16.0.0_oneplus_13_6.6.89", "LLVM-Clang18-r510928", "clang-r510928",
-               "-android15-8-g29d86c5fc9dd-abogki428889875-4k"),
-              ("sm8650", "cctv18/android_kernel_common_oneplus_sm8650",
-               "oneplus/sm8650_v_15.0.0_oneplus12_6.1.118", "LLVM-Clang18-r510928", "clang-r510928",
-               ""),
-              ("mt6991", "cctv18/android_kernel_oneplus_mt6991",
-               "oneplus/mt6991_v_15.0.2_ace5_ultra_6.6.89", "LLVM-Clang18-r510928", "clang-r510928",
-               "-android15-8-g29d86c5fc9dd-abogki428889875-4k"),
-              ("mt6993", "cctv18/android_kernel_oppo_mt6993",
-               "oppo/mt6993_b_16.0.0_find_x9", "LLVM-Clang19-r536225", "clang-r536225",
-               "-android16-5-ge7f2a9832757-ab13799791-4k"),
-          ]
+          with open("ko-targets.json", encoding="utf-8") as f:
+              targets = json.load(f)["targets"]
           soc = os.environ["SOC_INPUT"]
           branch = os.environ["BRANCH_INPUT"].strip()
           localversion = os.environ["LOCALVERSION_INPUT"].strip()
           include = []
-          for s, repo, default_branch, tag, clang_zip, default_lv in targets:
-              if soc in ("all", s):
-                  include.append({
-                      "soc": s,
-                      "repo": repo,
-                      "repo_dir": repo.split("/")[-1],
-                      "branch": branch or default_branch,
-                      "tag": tag,
-                      "clang_zip": clang_zip,
-                      "localversion": localversion or default_lv,
-                  })
+          for t in targets:
+              if soc in ("all", t["soc"]):
+                  entry = dict(t)
+                  entry["repo_dir"] = t["repo"].split("/")[-1]
+                  if branch:
+                      entry["branch"] = branch
+                  if localversion:
+                      entry["localversion"] = localversion
+                  include.append(entry)
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write("matrix=" + json.dumps({"include": include}) + "\n")
 
   build:
-    name: 编译 ${{ matrix.soc }} 风驰 KO
+    name: 编译 ${{ matrix.variant }} 风驰 KO
     needs: setup
     if: ${{ fromJson(needs.setup.outputs.matrix).include[0] != null }}
     strategy:
@@ -160,6 +145,9 @@ jobs:
           fi
           make O=out ARCH=arm64 LLVM=1 olddefconfig
           make O=out ARCH=arm64 LLVM=1 modules_prepare -j"$(nproc)"
+          UTS_RELEASE=$(sed -n 's/^#define UTS_RELEASE "\(.*\)"$/\1/p' out/include/generated/utsrelease.h)
+          echo "UTS_RELEASE=$UTS_RELEASE"
+          echo "UTS_RELEASE=$UTS_RELEASE" >> "$GITHUB_ENV"
 
       - name: 编译 hmbird.ko
         run: |
@@ -169,30 +157,32 @@ jobs:
           make -C "$WORK/common" O="$WORK/common/out" M="$MOD_TMP" \
             ARCH=arm64 LLVM=1 LLVM_IAS=1 KBUILD_MODPOST_WARN=1 modules -j"$(nproc)"
           mkdir -p "${{ github.workspace }}/dist"
-          cp "$MOD_TMP/hmbird.ko" "${{ github.workspace }}/dist/hmbird_${{ matrix.soc }}.ko"
+          # 文件名带完整内核版本串，同 SoC 不同 OTA 的 KO 可共存
+          cp "$MOD_TMP/hmbird.ko" \
+            "${{ github.workspace }}/dist/hmbird_${{ matrix.soc }}_${UTS_RELEASE}.ko"
 
       - name: 校验并记录 vermagic
         run: |
-          KO="${{ github.workspace }}/dist/hmbird_${{ matrix.soc }}.ko"
+          KO=$(ls "${{ github.workspace }}"/dist/hmbird_*.ko)
           file "$KO"
           VERMAGIC=$(modinfo "$KO" | sed -n 's/^vermagic:[[:space:]]*//p')
           echo "vermagic: $VERMAGIC"
           {
-            echo "## hmbird_${{ matrix.soc }}.ko"
+            echo "## $(basename "$KO")"
             echo ""
             echo "- 内核分支：\`${{ matrix.branch }}\`"
             echo "- localversion：\`${{ matrix.localversion }}\`"
             echo "- vermagic：\`$VERMAGIC\`"
             echo ""
-          } > "${{ github.workspace }}/dist/notes_${{ matrix.soc }}.md"
+          } > "${{ github.workspace }}/dist/notes_${{ matrix.variant }}.md"
 
       - name: 上传 KO 产物
         uses: actions/upload-artifact@v4
         with:
-          name: hmbird-${{ matrix.soc }}
+          name: ${{ matrix.variant }}
           path: |
-            dist/hmbird_${{ matrix.soc }}.ko
-            dist/notes_${{ matrix.soc }}.md
+            dist/hmbird_*.ko
+            dist/notes_${{ matrix.variant }}.md
 
   release:
     name: 发布 KO Release
@@ -206,7 +196,7 @@ jobs:
       - name: 下载全部 KO 产物
         uses: actions/download-artifact@v4
         with:
-          pattern: hmbird-*
+          pattern: '*'
           merge-multiple: true
           path: release_ko
 
