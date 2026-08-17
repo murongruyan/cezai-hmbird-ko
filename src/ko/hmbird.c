@@ -131,12 +131,25 @@ static struct device_node *hb_parent(void)
 	return parent;
 }
 
+/*
+ * 厂商 DT 中 oplus,hmbird 的子节点名随类型不同：
+ *   HMBIRD_OGKI（SM8750 及以下、MT6991/MT6993）→ version_type
+ *   HMBIRD_EXT（SM8850/SM8845）                 → config_type
+ * 校验与动态创建都必须使用对应类型自己的子节点名。
+ */
+static const char *hb_config_node_name(const char *expected)
+{
+	if (expected && !strcmp(expected, "HMBIRD_OGKI"))
+		return "version_type";
+	return "config_type";
+}
+
 static bool hb_type_matches(struct device_node *node, const char *expected)
 {
 	struct device_node *config;
 	const char *value;
 
-	config = hb_find_child(node, "config_type");
+	config = hb_find_child(node, hb_config_node_name(expected));
 	if (!config)
 		return false;
 	value = of_get_property(config, "type", NULL);
@@ -154,6 +167,7 @@ static int hb_apply_node(const char *expected)
 	struct device_node *existing;
 	struct device_node *node = NULL;
 	struct device_node *config = NULL;
+	const char *config_name = hb_config_node_name(expected);
 	int ret;
 
 	parent = hb_parent();
@@ -193,13 +207,13 @@ static int hb_apply_node(const char *expected)
 					   "oplus,hmbird");
 	if (ret)
 		goto fail;
-	config = of_changeset_create_node(&hb_changeset, node, "config_type");
+	config = of_changeset_create_node(&hb_changeset, node, config_name);
 	if (!config) {
 		ret = -ENOMEM;
 		goto fail;
 	}
 	ret = of_changeset_add_prop_string(&hb_changeset, config, "name",
-					   "config_type");
+					   config_name);
 	if (ret)
 		goto fail;
 	ret = of_changeset_add_prop_string(&hb_changeset, config, "type", expected);
@@ -295,4 +309,4 @@ module_exit(hmbird_exit);
 MODULE_DESCRIPTION("Standalone ColorOS/Realme UI HMBIRD live OF injector");
 MODULE_AUTHOR("murongchaopin prototype");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.1-hmbird-soc-gated");
+MODULE_VERSION("0.2-hmbird-type-child");
