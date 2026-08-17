@@ -96,11 +96,15 @@ KO 与设备内核 ABI 强绑定（vermagic / 符号 CRC），必须用对应机
 
 用法：仓库页 Actions →「云端编译风驰 KO」→ Run workflow：
 
-- `soc`：`all` = **全版本矩阵批量构建**（`ko-targets.json` 中 15 个已知版本/机型组合，
-  一次并行跑完）；也可选单个 SoC 只编它的已知版本；
+- `soc`：`all` = **动态枚举官方内核源码全部发布分支**（构建时实时拉取 7 个官方
+  源码镜像仓库的分支，当前约 32 个，新 OTA 分支出现后自动纳入）；也可选单个 SoC；
 - `kernel_branch`：覆盖分支（设备 OTA 与表中不一致时填对应分支）；
 - `localversion`：覆盖内核版本后缀（设备 `uname -r` 中版本号之后的部分）；
 - `attach_release`：`yes` 时把编译产物发布到 GitHub Release。
+
+已知真机版本串的分支（见 `ko-localversions.json`）产出可直接加载的 KO；其余分支
+产出占位构建（vermagic 为纯版本号），拿到对应设备 `uname -r` 后以 `localversion`
+重编即可精确匹配。
 
 | SoC | 默认内核源码分支（cctv18 镜像） | 工具链 |
 | --- | --- | --- |

@@ -1,0 +1,64 @@
+{
+  "repos": [
+    "cctv18/android_kernel_common_oneplus_sm8650",
+    "cctv18/android_kernel_common_oneplus_sm8750",
+    "cctv18/android_kernel_common_oneplus_sm8850",
+    "cctv18/android_kernel_common_oneplus_sm8845",
+    "cctv18/android_kernel_oneplus_mt6991",
+    "cctv18/android_kernel_oneplus_mt6993",
+    "cctv18/android_kernel_oppo_mt6993"
+  ],
+  "skip_patterns": ["_bak", "_dev", "test_"],
+  "soc_by_repo": {
+    "cctv18/android_kernel_common_oneplus_sm8650": "sm8650",
+    "cctv18/android_kernel_common_oneplus_sm8750": "sm8750",
+    "cctv18/android_kernel_common_oneplus_sm8850": "sm8850",
+    "cctv18/android_kernel_common_oneplus_sm8845": "sm8845",
+    "cctv18/android_kernel_oneplus_mt6991": "mt6991",
+    "cctv18/android_kernel_oneplus_mt6993": "mt6993",
+    "cctv18/android_kernel_oppo_mt6993": "mt6993"
+  },
+  "soc_override_by_branch": {
+    "oneplus/mt6991_v_15.0.2_ace5_ultra": "mt6991",
+    "oneplus/mt6991_v_15.0.2_ace5_ultra_6.6.89": "mt6991"
+  },
+  "toolchain_by_soc": {
+    "sm8650": "clang18",
+    "sm8750": "clang18",
+    "mt6991": "clang18",
+    "sm8850": "clang19",
+    "sm8845": "clang19",
+    "mt6993": "clang19"
+  },
+  "clang_tag_by_soc": {
+    "sm8650": "LLVM-Clang18-r510928",
+    "sm8750": "LLVM-Clang18-r510928",
+    "mt6991": "LLVM-Clang18-r510928",
+    "sm8850": "LLVM-Clang19-r536225",
+    "sm8845": "LLVM-Clang19-r536225",
+    "mt6993": "LLVM-Clang19-r536225"
+  },
+  "clang_zip_by_soc": {
+    "sm8650": "clang-r510928",
+    "sm8750": "clang-r510928",
+    "mt6991": "clang-r510928",
+    "sm8850": "clang-r536225",
+    "sm8845": "clang-r536225",
+    "mt6993": "clang-r536225"
+  },
+  "localversion_by_branch": {
+    "oneplus/sm8850_v_16.0.0_oneplus_15": "-android16-5-ga8f88ad96df3-ab13929693-4k",
+    "oneplus/sm8850_b_16.0_pad_3_pro": "-android16-5-g8c67d4274c0a-ab14275539-4k",
+    "oneplus/sm8845_b_16.0.0_ace_6t": "-android16-5-g8c67d4274c0a-ab14275539-4k",
+    "oppo/mt6993_b_16.0.0_find_x9": "-android16-5-ge7f2a9832757-ab13799791-4k",
+    "oneplus/mt6993_b_16.0_ace_6_ultra": "-android16-5-ge7f2a9832757-ab13799791-4k",
+    "oneplus/sm8750_v_15.0.0_oneplus_13": "-android15-8-g29d86c5fc9dd-abogki428889875-4k",
+    "oneplus/mt6991_v_15.0.2_ace5_ultra": "-android15-8-g29d86c5fc9dd-abogki428889875-4k",
+    "oneplus/sm8750_v_15.0.2_oneplus_13t": "-android15-8-g29d86c5fc9dd-abogki428889875-4k",
+    "oneplus/sm8750_v_15.0.1_pad_2_pro": "-android15-8-g29d86c5fc9dd-abogki428889875-4k",
+    "oneplus/sm8750_v_15.0.2_oneplus_13_6.6.66": "-android15-8-g29d86c5fc9dd-abogki428889875-4k",
+    "oneplus/sm8750_v_16.0.0_oneplus_13_6.6.89": "-android15-8-g29d86c5fc9dd-abogki428889875-4k",
+    "oneplus/mt6991_v_15.0.2_ace5_ultra_6.6.89": "-android15-8-g29d86c5fc9dd-abogki428889875-4k",
+    "oneplus/sm8750_b_16.0.0_oneplus_13_6.6.118": "-android15-8-g93e223c276e7-abogki500782043-4k"
+  }
+}
