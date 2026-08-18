@@ -1,0 +1,98 @@
+name: 校验并打包风驰 DTBO
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-package:
+    name: 校验并打包纯 DTBO 模块
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装打包工具
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends zip unzip
+
+      - name: 校验模块结构与脚本
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f module.prop
+          test -f customize.sh
+          test -f post-fs-data.sh
+          test -f service.sh
+          test -f scripts/hmbird_dtbo.sh
+          test -f scripts/patch_hmbird_dtbo.awk
+          test -f scripts/dtbo_avb.sh
+
+          for script in customize.sh post-fs-data.sh service.sh scripts/*.sh; do
+            sh -n "$script"
+          done
+
+          # The DTBO module must never regress to the old KO/process_dts path.
+          if git ls-files '*.ko' | grep -q .; then
+            echo '错误：仓库仍包含 .ko 文件' >&2
+            git ls-files '*.ko' >&2
+            exit 1
+          fi
+          if find bin scripts -type f -iname '*process_dts*' -print -quit | grep -q .; then
+            echo '错误：仓库仍包含 process_dts' >&2
+            exit 1
+          fi
+
+          grep -q '^[[:space:]]*HMBIRD_AWK=/system/bin/awk$' scripts/hmbird_dtbo.sh
+          grep -q 'fragment@15' scripts/patch_hmbird_dtbo.awk
+          grep -q 'version_type' scripts/patch_hmbird_dtbo.awk
+          grep -q 'config_type' scripts/patch_hmbird_dtbo.awk
+
+      - name: 构建并审计 ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/^version=//p' module.prop | head -n1)
+          VERSION_CODE=$(sed -n 's/^versionCode=//p' module.prop | head -n1)
+          test -n "$VERSION"
+          test -n "$VERSION_CODE"
+
+          rm -rf dist
+          mkdir -p dist/module
+          cp -p module.prop customize.sh post-fs-data.sh service.sh README.md LICENSE dist/module/
+          cp -a bin scripts dist/module/
+
+          (cd dist/module && zip -q -r "../sideload-hmbird-dtbo-v${VERSION}.zip" .)
+          ZIP="dist/sideload-hmbird-dtbo-v${VERSION}.zip"
+          unzip -tq "$ZIP"
+
+          if unzip -Z1 "$ZIP" | grep -E '\.ko$' >/dev/null; then
+            echo '错误：发布 ZIP 包含 .ko' >&2
+            exit 1
+          fi
+          if unzip -Z1 "$ZIP" | grep -F 'process_dts' >/dev/null; then
+            echo '错误：发布 ZIP 包含 process_dts' >&2
+            exit 1
+          fi
+          unzip -Z1 "$ZIP" | grep -Fx 'service.sh' >/dev/null
+          unzip -Z1 "$ZIP" | grep -Fx 'scripts/hmbird_dtbo.sh' >/dev/null
+          unzip -Z1 "$ZIP" | grep -Fx 'bin/dtc' >/dev/null
+
+          sha256sum "$ZIP" | tee "${ZIP}.sha256"
+          printf 'version=%s\nversionCode=%s\n' "$VERSION" "$VERSION_CODE" > dist/build-info.txt
+
+      - name: 上传 DTBO 模块产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: sideload-hmbird-dtbo
+          path: |
+            dist/sideload-hmbird-dtbo-v*.zip
+            dist/sideload-hmbird-dtbo-v*.zip.sha256
+            dist/build-info.txt

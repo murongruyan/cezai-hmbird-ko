@@ -1,18 +1,8 @@
 #!/system/bin/sh
 
-# 侧载风驰ko 刷入脚本（customize.sh）
-# 参照「慕容调度」风驰配置的设备云控流程，刷入时按 SoC 自动设置设备云控 ID：
-#   1) resetprop ro.boot.prjname <按 SoC 的云控 ID>
-#   2) 校验属性已生效
-#   3) 清除应用增强数据（pm clear com.oplus.cosa），让 COSA 按新项目号重新走一遍
-#   4) 重启游戏助手服务（persist.sys.oplus.gameswitch.enable 0 → 1）
-# 任何一步不满足条件都会跳过并继续安装，不影响 KO 侧载本身（KO 在开机时另行按
-# ColorOS/Realme UI 与 SoC 门控加载）。
-
-echo ""
-echo "********************************************"
-echo "  侧载风驰ko：设备云控 ID 自动设置"
-echo "********************************************"
+# 风驰 DTBO 刷入脚本：持久 DTBO 后端。
+# 云控 ID 流程仍按原模块执行；风驰节点由 hmbird_dtbo.sh 写入当前 slot 的 DTBO。
+SKIPUNZIP=0
 
 detect_ui_family() {
     realme_ui=$(getprop ro.build.version.realmeui 2>/dev/null | tr -d '[:space:]')
@@ -39,18 +29,25 @@ detect_soc() {
     esac
 }
 
-# SoC → 设备云控 ID（ro.boot.prjname）
 prjname_for_soc() {
     case "$1" in
         SM8850|SM8850P|SM8845) printf '%s\n' 24831 ;;
         SM8750|SM8750P)        printf '%s\n' 24851 ;;
         SM8650|SM8650P)        printf '%s\n' 23851 ;;
-        MT6991|MT6993)        printf '%s\n' 24813 ;;
-        MT6995)              printf '%s\n' 25815 ;;
+        MT6991|MT6993)         printf '%s\n' 24813 ;;
+        MT6995)                printf '%s\n' 25815 ;;
         *) return 1 ;;
     esac
 }
 
+echo ""
+echo "********************************************"
+echo "  风驰 DTBO：风驰节点 + 设备云控"
+echo "********************************************"
+
+# 云控属性必须在 DTBO 处理完成后再设置。DTBO 写入器只按节点结构工作，
+# 与机型名、project-id 和显示清单无关；云控流程仍在写入成功后执行。
+apply_cloud_control() {
 RESETPROP=
 if [ -x /data/adb/ksu/bin/resetprop ]; then
     RESETPROP=/data/adb/ksu/bin/resetprop
@@ -59,53 +56,81 @@ elif [ -x /data/adb/magisk/resetprop ]; then
 elif command -v resetprop >/dev/null 2>&1; then
     RESETPROP=resetprop
 fi
-
 if [ -z "$RESETPROP" ]; then
     echo "- 未找到 resetprop，跳过设备云控 ID 设置"
-    exit 0
-fi
-
-UI_FAMILY=$(detect_ui_family) || {
-    echo "- 未识别 ColorOS/Realme UI，跳过设备云控 ID 设置"
-    exit 0
-}
-SOC_MODEL=$(detect_soc) || {
-    echo "- 未识别受支持 SoC，跳过设备云控 ID 设置"
-    exit 0
-}
-PRJNAME=$(prjname_for_soc "$SOC_MODEL") || {
-    echo "- SoC=$SOC_MODEL 无云控 ID 映射，跳过"
-    exit 0
-}
-
-echo "- SoC=$SOC_MODEL, UI=$UI_FAMILY → 设备云控 ID=$PRJNAME"
-"$RESETPROP" ro.boot.prjname "$PRJNAME" || {
-    echo "! resetprop ro.boot.prjname 执行失败"
-    exit 0
-}
-CURRENT_PRJNAME=$(getprop ro.boot.prjname 2>/dev/null)
-if [ "$CURRENT_PRJNAME" != "$PRJNAME" ]; then
-    echo "! ro.boot.prjname 校验失败：当前=$CURRENT_PRJNAME 期望=$PRJNAME"
-    exit 0
-fi
-echo "- ro.boot.prjname 已设置为 $PRJNAME"
-
-# 参考项目后续动作 1：清除应用增强数据，让 COSA 按新项目号重新走一遍
-if pm path com.oplus.cosa >/dev/null 2>&1; then
-    if pm clear com.oplus.cosa >/dev/null 2>&1; then
-        echo "- 已清除应用增强数据（com.oplus.cosa）"
-    else
-        echo "! 清除应用增强数据失败"
-    fi
 else
-    echo "- 未检测到 com.oplus.cosa，跳过数据清除"
+    UI_FAMILY=$(detect_ui_family) || UI_FAMILY=
+    SOC_MODEL=$(detect_soc) || SOC_MODEL=
+    if [ -z "$UI_FAMILY" ]; then
+        echo "- 未识别 ColorOS/Realme UI，跳过设备云控 ID 设置"
+    elif [ -z "$SOC_MODEL" ]; then
+        echo "- 未识别受支持 SoC，跳过设备云控 ID 设置"
+    else
+        PRJNAME=$(prjname_for_soc "$SOC_MODEL") || PRJNAME=
+        if [ -z "$PRJNAME" ]; then
+            echo "- SoC=$SOC_MODEL 无云控 ID 映射，跳过"
+        else
+            echo "- SoC=$SOC_MODEL, UI=$UI_FAMILY → 设备云控 ID=$PRJNAME"
+            "$RESETPROP" ro.boot.prjname "$PRJNAME" ||
+                echo "! resetprop ro.boot.prjname 执行失败"
+            CURRENT_PRJNAME=$(getprop ro.boot.prjname 2>/dev/null)
+            [ "$CURRENT_PRJNAME" = "$PRJNAME" ] ||
+                echo "! ro.boot.prjname 校验失败：当前=$CURRENT_PRJNAME 期望=$PRJNAME"
+            if pm path com.oplus.cosa >/dev/null 2>&1; then
+                if pm clear com.oplus.cosa >/dev/null 2>&1; then
+                    echo "- 已清除应用增强数据（com.oplus.cosa）"
+                else
+                    echo "! 清除应用增强数据失败"
+                fi
+            else
+                echo "- 未检测到 com.oplus.cosa，跳过数据清除"
+            fi
+            setprop persist.sys.oplus.gameswitch.enable 0
+            sleep 2
+            setprop persist.sys.oplus.gameswitch.enable 1
+            echo "- 已重启游戏助手服务（persist.sys.oplus.gameswitch.enable 0→1）"
+        fi
+    fi
+fi
+}
+
+MODPATH=${MODPATH:-${0%/*}}
+INSTALLED_MOD_PATH=/data/adb/modules/sideload_hmbird
+
+# 更新安装时沿用已验证的原厂 DTBO 基线，避免把上一次写入的镜像当成原厂。
+if [ "$INSTALLED_MOD_PATH" != "$MODPATH" ]; then
+    for relative_path in img/dtbo.img img/dtbo.img.sha256 img/dtbo.img.gz; do
+        source_file="$INSTALLED_MOD_PATH/$relative_path"
+        target_file="$MODPATH/$relative_path"
+        if [ -f "$source_file" ] && [ ! -L "$source_file" ] && [ ! -f "$target_file" ]; then
+            mkdir -p "${target_file%/*}" || abort "无法保留 DTBO 备份目录"
+            cp -p "$source_file" "$target_file" || abort "无法保留 DTBO 备份"
+        fi
+    done
 fi
 
-# 参考项目后续动作 2：重启游戏助手服务
-setprop persist.sys.oplus.gameswitch.enable 0
-sleep 2
-setprop persist.sys.oplus.gameswitch.enable 1
-echo "- 已重启游戏助手服务（persist.sys.oplus.gameswitch.enable 0→1）"
+BIN_DIR="$MODPATH/bin"
+for install_tool in avbtool/avbtool openssl dtc mkdtimg unpack_dtbo pack_dtbo; do
+    [ -f "$BIN_DIR/$install_tool" ] || abort "缺少 DTBO 工具：$install_tool"
+    chmod 0755 "$BIN_DIR/$install_tool" || abort "无法设置 DTBO 工具权限"
+done
+chmod 0755 "$BIN_DIR/avbtool/"*.so 2>/dev/null
 
-echo "- 云控 ID 设置完成。此后每次开机模块会在 post-fs-data 自动重设 ro.boot.prjname（只改属性，不清数据）。"
+ui_print "正在生成并写入风驰 DTBO 节点"
+HMBIRD_LOG="$MODPATH/runtime/hmbird_dtbo_install.log"
+mkdir -p "${HMBIRD_LOG%/*}" 2>/dev/null
+if sh "$MODPATH/scripts/hmbird_dtbo.sh" prepare >"$HMBIRD_LOG" 2>&1; then
+    ui_print "风驰 DTBO 写入成功"
+else
+    ui_print "HMBIRD DTBO 失败原因："
+    tail -n 12 "$HMBIRD_LOG" 2>/dev/null | while IFS= read -r hmbird_line; do
+        [ -n "$hmbird_line" ] && ui_print "$hmbird_line"
+    done
+    abort "风驰 DTBO 写入失败，已停止安装"
+fi
+
+# DTBO 生成、AVB 合成和分区回读均成功后，才执行原模块的云控流程。
+apply_cloud_control
+
+ui_print "风驰节点已写入当前 slot 的 DTBO，请重启设备"
 exit 0

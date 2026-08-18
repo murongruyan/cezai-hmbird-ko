@@ -1,7 +1,7 @@
 id=sideload_hmbird
-name=侧载风驰ko
-version=1.7
-versionCode=8
+name=风驰 DTBO
+version=1.15
+versionCode=16
 author=慕容茹艳（酷安慕容雪绒）
-description=从「慕容显示增强」模块抽取的风驰（hmbird）KO 独立侧载模块：开机早期按 ColorOS/Realme UI 与 SoC 自动加载并选择 HMBIRD_EXT / HMBIRD_OGKI 节点类型，每次开机自动重设设备云控 ID（ro.boot.prjname）；刷入时另按 SoC 设置云控 ID，并清除应用增强数据、重启游戏助手服务。
+description=风驰 DTBO 节点模块：安装时按 SoC 生成并写入 HMBIRD_EXT/HMBIRD_OGKI 节点，OGKI 使用 fragment@15/version_type；保留设备云控 ID 流程。
 minMagisk=17000
